@@ -1,2 +1,1 @@
-# imazzara
-site
+# Imazzara personal website

@@ -1,0 +1,53 @@
+:root {
+  color-scheme: light dark; /* both supported */
+}
+
+body {
+  margin: 0;
+  font-family: 'Inconsolata', 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #121212;
+  }
+
+  body,
+  a {
+    color: #eeeeee;
+  }
+
+  footer {
+    background: #eeeeee;
+  }
+
+  footer a {
+    color: #121212;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  body {
+    background: #ffffff;
+  }
+
+  body,
+  a {
+    color: #121212;
+  }
+
+  footer {
+    background: #121212;
+  }
+
+  footer a {
+    color: #eeeeee;
+  }
+}
