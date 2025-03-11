@@ -38,7 +38,7 @@ export function useProjects(): Project[] {
     {
       role: 'Creator',
       title: 'web3playground 🎪',
-      url: 'https://web3playground.io',
+      url: 'https://web3playground.vercel.app/',
     },
     {
       role: 'Creator',
