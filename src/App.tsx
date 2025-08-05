@@ -13,7 +13,7 @@ function App() {
       <div className="container">
         <h1> Hi, I'm Ignacio Mazzara</h1>
         <p>
-          <b>Now:</b> Engineer Manager at{' '}
+          <b>Now:</b> VP of Engineering at{' '}
           <a href="https://decentraland.org" target="_blank" rel="noreferrer">
             decentraland.org
           </a>
