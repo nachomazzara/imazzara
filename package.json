@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:prerender": "vite build && node scripts/prerender.mjs",
     "preview": "vite preview",
     "start": "vite",
     "generate-og": "node scripts/generate-og-images.mjs"
