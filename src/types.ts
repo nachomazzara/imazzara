@@ -15,6 +15,7 @@ export type BlogPost = {
   title: string
   description?: string
   hero?: string
+  ogImage?: string
   content: string
   published: Date
 }

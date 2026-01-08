@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 1200px;
+      height: 630px;
+      background: #f5f5f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Inconsolata', 'Roboto', sans-serif;
+      position: relative;
+    }
+    
+    .container {
+      width: 1000px;
+      height: 500px;
+      background: white;
+      border: 2px solid #000;
+      display: flex;
+      flex-direction: column;
+      padding: 60px;
+    }
+    
+    .hero-title {
+      display: flex;
+      align-items: center;
+      gap: 30px;
+      margin-bottom: auto;
+      flex-wrap: wrap;
+    }
+    
+    .hero {
+      font-size: 120px;
+      font-weight: 300;
+      line-height: 1;
+      color: #000;
+      opacity: 0.8;
+      font-family: 'Inconsolata', sans-serif;
+      flex-shrink: 0;
+    }
+    
+    .separator {
+      font-size: 64px;
+      font-weight: 300;
+      color: #000;
+      opacity: 0.5;
+      font-family: 'Inconsolata', sans-serif;
+    }
+    
+    .title {
+      font-size: 64px;
+      font-weight: 700;
+      line-height: 1.2;
+      color: #000;
+      white-space: pre-line;
+      font-family: 'Inconsolata', sans-serif;
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      margin-top: auto;
+      font-size: 18px;
+      color: #000;
+      font-family: 'Inconsolata', sans-serif;
+    }
+    
+    .author {
+      font-weight: 400;
+    }
+    
+    .website {
+      font-weight: 400;
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@200;300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <div class="hero-title">
+      <div class="hero" id="hero"></div>
+      <span class="separator" id="separator">-</span>
+      <div class="title" id="title"></div>
+    </div>
+    <div class="footer">
+      <div class="author">by Nacho Mazzara</div>
+      <div class="website">imazzara.com</div>
+    </div>
+  </div>
+  <script>
+    // Hero and title will be replaced by the build script
+    document.getElementById('hero').textContent = '∞';
+    document.getElementById('title').textContent = 'Blog Post Title';
+  </script>
+</body>
+</html>
+

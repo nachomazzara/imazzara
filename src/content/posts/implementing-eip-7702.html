@@ -1,0 +1,713 @@
+<blockquote>
+<p>This guide will walk you through implementing EIP-7702 (ERC-7702) at a low level, without using high-level functions from libraries or toolkits like ethers, viem, alchemy, etc. The goal is to understand the core concepts and mechanics of this EIP by implementing it from scratch. For high level understanding refer to <a href="https://eip7702.io/examples#basic-authorization" target="_blank" rel="noopener noreferrer">this (viem)</a> and/or <a href="https://github.com/ethers-io/ethers.js/blob/main/src.ts/wallet/base-wallet.ts#L131" target="_blank" rel="noopener noreferrer">this (ethers => wallet.authorize new method)</a></p>
+</blockquote>
+
+<h2>What is EIP-7702?</h2>
+
+<p><a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md" target="_blank" rel="noopener noreferrer">EIP-7702</a>, introduced in Ethereum's Pectra upgrade, enables traditional user wallets (EOAs) to temporarily leverage smart contract capabilities within individual transactions. This innovation allows users to batch transactions, benefit from sponsored (gasless) payments, integrate alternative authentication methods (social recovery), and set spending limits—all without permanently converting their accounts into smart contracts. The upgrade significantly simplifies user interactions and enhances Ethereum's usability, security, and flexibility.</p>
+
+<h2>Introduction</h2>
+
+<p>This blog post walks you through implementing low-level <a href="https://eips.ethereum.org/EIPS/eip-7702" target="_blank" rel="noopener noreferrer">EIP-7702 transactions</a>, explicitly focusing on the authorization mechanism to clearly expose what happens behind the scenes, without relying on high-level abstractions from libraries like Ethers or Viem. Understanding the authorization process is crucial, as this is the key component that temporarily converts your Externally Owned Account (EOA) into a smart account capable of executing complex logic. Now, more than ever, it's essential to fully grasp what you're signing. A single careless signature could expose your EOA to unintended interactions and potential risks. Always double-check and fully understand each transaction you authorize. Stay safe!</p>
+
+<p>See <a href="https://github.com/nachomazzara/eip7702-poc/blob/main/src" target="_blank" rel="noopener noreferrer">the repo</a> for full code examples.</p>
+
+<p>In this guide, we'll walk through <strong>three different scenarios</strong> illustrating how EIP-7702 account delegation works in practice:</p>
+
+<ul>
+<li><a href="#delegating-to-a-smart-contract"><strong>Delegating to a Smart Contract</strong></a></li>
+<li><a href="#delegate-and-execute-in-a-single-transaction"><strong>Delegate and Batch Execute (in a Single Transaction)</strong></a></li>
+<li><a href="#undelegating-revoking-delegation"><strong>Undelegating (Revoking Delegation)</strong></a></li>
+<li><a href="#bonus-track-advanced-use-cases-and-considerations"><strong>Bonus track: Advanced Use Cases and Considerations</strong></a></li>
+</ul>
+
+<h2 id="delegating-to-a-smart-contract">Delegating to a Smart Contract</h2>
+
+<p>First, we'll demonstrate how you can delegate your <strong>Externally Owned Account (EOA)</strong> to a previously deployed smart contract, temporarily (until you explicitly decide it) transforming your EOA into a smart account capable of executing advanced logic.</p>
+
+<p><strong>Important:</strong><br>
+The initial smart contract used here is intentionally <strong>unsafe</strong> for demonstration purposes, as it does not restrict who can invoke its capabilities once delegated. In a real-world scenario, it's crucial to use an <strong>audited and secure contract</strong> that strictly validates signatures, ensuring that only transactions explicitly authorized by your EOA are executed.</p>
+
+<p>These delegated interactions are referred to as <strong>"User Operations."</strong></p>
+
+<p>At the end of the blog post, we'll cover how you can enhance security to avoid risks.</p>
+
+<h3>Step 1: Setting Up Provider and Wallets</h3>
+
+<p><strong>Provider &amp; Wallets Initialization</strong>:</p>
+
+<pre class="language-typescript"><code>const provider = new JsonRpcProvider(
+  `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_KEY}`
+)
+
+// **Authorizer**: Signs off-chain authorization messages (does not require Ether). The EOA that will be converted to a smart account
+const authorizerKey = process.env.AUTHORIZER_PRIVATE_KEY!
+const authorizer = new Wallet(authorizerKey)
+
+// **Relayer**: Sends the transaction and covers gas costs (requires Ether). Used to simply simulate how a bundler or relayer will work
+const relayerKey = process.env.RELAYER_PRIVATE_KEY!
+const relayer = new Wallet(relayerKey, provider)
+
+const chainId = (await provider.getNetwork()).chainId
+const authNonce = await provider.getTransactionCount(
+  authorizer.address, 
+  'pending'
+)
+const relayerNonce = await provider.getTransactionCount(
+  relayer.address, 
+  'pending'
+)
+
+// **Delegator**: The EOA will delegate execution to this smart contract, running the contract's implementation and storage layout directly within the EOA's context, similar to how a delegatecall operates.
+const delegatorAddr = process.env.DELEGATOR_ADDRESS!
+</code></pre>
+
+<p>The Delegator contract used in this post has a single core method:</p>
+
+<pre class="language-solidity"><code>function executeBatch(Call[] calldata calls)
+</code></pre>
+
+<p>This method allows you to execute multiple calls in one atomic transaction. Each Call includes a target address, a value in ETH (if any), and the data payload, typically the encoded function call.</p>
+
+<p>When your EOA delegates to this contract (via EIP-7702), it adopts its logic temporarily, enabling batch execution as if it were a smart contract account.</p>
+
+<p>You can view the full source code by expanding the section below</p>
+
+<details open>
+<summary><strong>See Delegator Contract Code</strong></summary>
+
+<pre class="language-solidity"><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+/// @title 7702 Batch Delegator
+/// @notice Under an EIP-7702 set-code tx, your EOA can adopt this code and forward **batches** of calls.
+///         Sign an authorization for this contract's address, then send a type-0x04 tx
+///         to your EOA with data = abi.encodeWithSelector(BatchDelegator.executeBatch.selector, calls).
+contract BatchDelegator {
+    struct Call {
+        address target;
+        uint256 value;
+        bytes   data;
+    }
+
+    /// @param signer   The EOA that drove this execution (msg.sender once code is injected).
+    /// @param calls    The batch of calls made.
+    /// @param results  The returned data from each call.
+    event BatchExecuted(
+        address indexed signer,
+        Call[]   calls,
+        bytes[]  results
+    );
+
+    /// @notice Forwards a batch of calls (and any ETH) atomically.
+    /// @param calls  An array of { target, value, data } structs.
+    ///                The sum of all `value` fields must be ≤ msg.value.
+    /// @return results  An array of return data, one per call.
+    function executeBatch(Call[] calldata calls)
+        external
+        payable
+        returns (bytes[] memory results)
+    {
+        uint256 n = calls.length;
+        results = new bytes[](n);
+
+        // Forward each call
+        for (uint256 i = 0; i < n; i++) {
+            Call calldata c = calls[i];
+            (bool ok, bytes memory ret) = c.target.call{ value: c.value }(c.data);
+            require(ok, "BatchDelegator: call failed");
+
+            if (ret.length > 0) {
+                bool success = abi.decode(ret, (bool));
+                require(success, "BatchDelegator: call returned false");
+            }
+            results[i] = ret;
+        }
+
+        emit BatchExecuted(msg.sender, calls, results);
+        return results;
+    }
+}
+</code></pre>
+
+<p>See the code deployed on Sepolia: <a href="https://sepolia.etherscan.io/address/0x0eacc2307f0113f26840dd1dac8dc586259994dd#code" target="_blank" rel="noopener noreferrer">0x0eacc2307f0113f26840dd1dac8dc586259994dd</a></p>
+</details>
+
+<h3>Step 2: Creating EIP-7702 Authorization</h3>
+
+<p>According to EIP-7702, to delegate execution to a smart contract, an EOA must sign a message hash with the following structure and add a new object, the <code>authorizationList</code>, to the transaction payload:</p>
+
+<pre class="language-solidity"><code>keccak256(0x05 || RLP([chainId, contract_address, nonce]))
+</code></pre>
+
+<ul>
+<li><code>0x05</code> is the MAGIC_PREFIX – a one-byte domain separator used to ensure the hash is unique to EIP-7702 and prevents cross-protocol replay attacks.</li>
+<li><code>RLP([chainId, contract_address, nonce])</code> is a list of 3 values encoded using Ethereum's Recursive Length Prefix (RLP) encoding.</li>
+<li>The EOA must then sign this hash using its private key. This signature is what allows the EOA to delegate execution rights temporarily to the contract.</li>
+</ul>
+
+<p>Now let's expand on how the <code>authorizationList</code> is used in EIP-7702 transactions and what parameters are required, following the spec and what the code is doing.</p>
+
+<p>Each item in the list is an <strong>authorization object</strong>, and it must include three specific fields:</p>
+
+<pre class="language-typescript"><code>const authorization: AuthorizationLike = {
+  chainId,            // The chain where the delegation applies
+  address: delegatorAddr, // The smart contract to which you are delegating execution
+  nonce: authNonce,   // The current nonce of the EOA (prevents replay)
+  signature           // The EOA-signed hash (see explanation above)
+}
+</code></pre>
+
+<p>Here's what each parameter means:</p>
+
+<h4>chainId</h4>
+
+<p>The <code>chainId</code> ensures the signature is valid only on a specific Ethereum chain (e.g., Sepolia, Mainnet). It prevents cross-chain replay attacks.</p>
+
+<h4>address</h4>
+
+<p>This is the <strong>delegator smart contract</strong>—the contract the EOA wants to temporarily use as its execution logic. This address will receive and execute the calldata of the transaction as if it were the EOA.</p>
+
+<h4>nonce</h4>
+
+<p>The <code>nonce</code> is taken from the EOA's current pending nonce (e.g., using <code>getTransactionCount(authorizer.address, 'pending')</code>). It ensures that the authorization is <strong>used only once</strong>. If you reuse the same authorization in another transaction, it will be invalid.</p>
+
+<h4>signature</h4>
+
+<p>This is the EOA's <strong>raw ECDSA signature</strong> of the <code>messageHash</code> (see previous explanation). It proves that the EOA willingly authorized delegation to the contract at that nonce and on that chain.</p>
+
+<p>It is signed using:</p>
+
+<pre class="language-typescript"><code>const signature = await new SigningKey(authorizer.privateKey).sign(messageHash)
+</code></pre>
+
+<blockquote>
+<p>Note: This is a low-level raw signature—not a typed signature like EIP-712. That simplicity makes it safer and less error-prone.</p>
+</blockquote>
+
+<p>Once you have the full authorization object, you include it in the transaction like this:</p>
+
+<pre class="language-typescript"><code>const tx = {
+  type: 4,
+  chainId,
+  nonce: relayerNonce,
+  ... // gas config, to, data, etc.
+  authorizationList: [authorization]
+}
+</code></pre>
+
+<p>This tells the Ethereum network:</p>
+
+<blockquote>
+<p>"I (EOA) authorize the smart contract at <code>address</code> to act on my behalf for this one transaction, validated by this signature and tied to my nonce."</p>
+</blockquote>
+
+<p>This <code>authorizationList</code> is the <strong>core mechanic</strong> that temporarily turns your EOA into a smart account securely, safely, and without needing a permanent contract wallet.</p>
+
+<p>Let's see the code:</p>
+
+<pre class="language-typescript"><code>const messageHash = keccak256(concat([
+    '0x05',  // MAGIC_PREFIX: Domain separator for EIP-7702
+    encodeRlp([
+      chainId ? toBeHex(chainId) : '0x',
+      delegatorAddr,
+      authNonce ? toBeHex(authNonce) : '0x'
+    ])
+  ]))
+
+// Sign the authorization hash with the EOA key (Authority)
+const signature = await new SigningKey(authorizer.privateKey).sign(messageHash)
+
+const authorization: AuthorizationLike = {
+    chainId,
+    address: delegatorAddr!,
+    nonce: authNonce,
+    signature
+}
+</code></pre>
+
+<h3>Step 3: Sending the Transaction</h3>
+
+<p>We now have everything we need to send the transaction. Since we're only creating the delegation (and not executing anything yet), the transaction will have:</p>
+
+<ul>
+<li>Type: <code>0x04</code> (EIP-7702)</li>
+<li>Calldata: <code>0x</code> empty (0x)</li>
+<li>Authorization: the object we just created and signed</li>
+</ul>
+
+<p>This transaction is sent by the relayer, not the EOA, so the user doesn't need to hold any ETH. The EOA only needs to sign the delegation message; the relayer pays for gas and submits the transaction on-chain.</p>
+
+<p>Construct a type-4 transaction (EIP-7702 compatible):</p>
+
+<pre class="language-typescript"><code>const tx = {
+  type: 4,
+  chainId,
+  nonce: relayerNonce,
+  maxPriorityFeePerGas: toBigInt('1000000000'),
+  maxFeePerGas: toBigInt('10000000000'),
+  gasLimit: 2_000_000n,
+  to: '0x0000000000000000000000000000000000000000',
+  value: 0n,
+  data: '0x',
+  accessList: [],
+  authorizationList: [authorization]
+}
+
+const raw = await relayer.signTransaction(tx)
+const txHash = await provider.send('eth_sendRawTransaction', [raw])
+console.log('Raw tx sent, hash =', txHash)
+</code></pre>
+
+<p>Perfect! Now that the transaction is sent, you can head over to a block explorer (like <a href="https://sepolia.etherscan.io/tx/0x3eed1e94f2c706ded9e6e995b8a6b2f9575903b1cf5b362ba7d3367782de9b47" target="_blank" rel="noopener noreferrer">Etherscan for Sepolia</a>) to verify everything.</p>
+
+<p>As mentioned above, we're <strong>only creating the delegation</strong>, not executing any logic within the delegated contract. To do that safely, we send the transaction to the <strong>null address</strong> <code>to: '0x0000000000000000000000000000000000000000'</code></p>
+
+<p>By setting <code>to</code> as <code>0x0</code> and leaving <code>data</code> empty (<code>0x</code>), we ensure:</p>
+
+<ul>
+<li>No function is called</li>
+<li>No ETH is transferred</li>
+<li>We're only registering the delegation through the <code>authorizationList</code></li>
+</ul>
+
+<p>This is a minimal, no-op transaction where the only effect is that the EOA <strong>adopts the contract code temporarily</strong>, enabling smart account behavior for future transactions.</p>
+
+<div class="blog-callout blog-callout-success">
+<p><strong>The EOA now has delegated code, but nothing was executed yet.</strong></p>
+</div>
+
+<p>There, you'll see a new section under the transaction details labeled <strong>Authorization List</strong>. This is part of the new <code>0x04</code> transaction format introduced by EIP-7702.</p>
+
+<p>If everything was successful, you should see:</p>
+
+<ul>
+<li>The <strong>delegated smart contract address</strong></li>
+<li>The <strong>EOA that authorized it</strong></li>
+<li>The <strong>nonce</strong> used</li>
+<li>The <strong>signature</strong> that validates the delegation</li>
+</ul>
+
+<p><img src="https://hackmd.io/_uploads/Hk5---Yzgl.png" alt="Authority Match" /></p>
+
+<p>You can see in Etherscan that the authority matches the authorizer address and the validity is <code>True</code></p>
+
+<p><img src="https://hackmd.io/_uploads/ByqbW-Yzxg.png" alt="See new Transactions Type" /></p>
+
+<p>You can also see in the <a href="https://sepolia.etherscan.io/address/0xBA6E94cCd3EF39B5214dc945FB53ad4aadD0bcdb#authlist7702" target="_blank" rel="noopener noreferrer">address page</a> the <code>Other Transactions</code> tab with the delegation created</p>
+
+<p>This confirms that the delegation worked and your EOA is now temporarily behaving like a smart account linked to the delegator contract.</p>
+
+<p><em>Next Steps:</em> You can now send normal transactions to the EOA address and will use the delegator code. Check <a href="https://sepolia.etherscan.io/tx/0x651bacc2422f2d13d70a954c2d697194868a03998c79925510dd5c58f2ede7fc#eventlog" target="_blank" rel="noopener noreferrer">this transaction</a> that performs an ERC-20 approval. It was sent to the EOA and the EOA is using the delegated contract implementation.</p>
+
+<p>See the full code <a href="https://github.com/nachomazzara/eip7702-poc/blob/main/src/delegate.ts" target="_blank" rel="noopener noreferrer">here.</a></p>
+
+<h2 id="delegate-and-execute-in-a-single-transaction">Delegate and Execute (in a Single Transaction)</h2>
+
+<p>Next, we'll explore how delegation and transaction execution can be performed atomically within the same operation. This method allows immediate execution without a separate delegation transaction, making the process efficient and user-friendly.</p>
+
+<p>We'll provide clear, step-by-step code examples demonstrating this approach.</p>
+
+<h3>Use Case: Registering a Name via Smart Contract</h3>
+
+<p>Have you ever been frustrated by the clunky multi-transaction flows in Web3?</p>
+
+<p>Imagine you're trying to register a unique name on a decentralized naming service. In the traditional approach, this simple action becomes a <strong>UX nightmare</strong>:</p>
+
+<ol>
+<li>First, you need to <strong>approve</strong> the registry to spend your tokens (wait for confirmation...)</li>
+<li>Then, you <strong>call</strong> the register function (wait again...)</li>
+<li>Two transactions = double the gas fees</li>
+<li>Two signatures = double the friction</li>
+<li>If the first succeeds but the second fails? You're stuck with a dangling approval!</li>
+</ol>
+
+<p><strong>But what if you could do it all in ONE atomic transaction?</strong></p>
+
+<p>That's exactly what we're about to show you! With EIP-7702, we'll transform this painful two-step dance into a <strong>single, elegant operation</strong>. No more waiting between steps, no more double gas fees, and no more worrying about partial failures.</p>
+
+<p><strong>Ready to see the magic?</strong> In the following sections, we'll walk you through how to interact with a <strong>Name Registry contract</strong>, which allows users to register a name by minting an NFT in exchange for 100 tokens:</p>
+
+<ul>
+<li>How to build the batch calldata</li>
+<li>How to combine delegation with execution</li>
+<li>How to send it all in one beautiful transaction</li>
+</ul>
+
+<p>Let's dive in and build something amazing!</p>
+
+<h3>Smart Contract Overview: Name Registry</h3>
+
+<p>The contract we're using includes a <code>register</code> function:</p>
+
+<pre class="language-solidity"><code>function register(string _name, address _beneficiary) external;
+</code></pre>
+
+<p>When called, it:</p>
+
+<ul>
+<li>Deducts <strong>100 tokens</strong> from the caller</li>
+<li>Mints a <strong>Name NFT</strong> with the provided <code>_name</code></li>
+<li>Assigns it to the <code>_beneficiary</code></li>
+</ul>
+
+<p>But before doing this, the caller (your EOA) must approve the registry contract to spend tokens—normally a separate transaction.</p>
+
+<h3>EIP-7702 to the Rescue</h3>
+
+<p>We'll combine both actions into a single transaction:</p>
+
+<ol>
+<li><code>approve(tokenSpender, 100e18)</code> — ERC-20 approval</li>
+<li><code>register("myname", myEOA)</code> — call the registry</li>
+</ol>
+
+<p>These two actions are wrapped into a batch and executed via the <strong>delegated contract</strong>.</p>
+
+<h3>Prerequisite</h3>
+
+<p>Before doing this, you must ensure your EOA <strong>has 100 tokens</strong>. If not, mint or transfer tokens to the EOA first so the <code>register</code> call doesn't fail due to insufficient balance.</p>
+
+<p>With delegation + batching, this flow becomes smoother and more gas-efficient—while also enabling true <strong>gasless UX</strong> when combined with a relayer.</p>
+
+<h3>Building the <code>calldata</code> for Delegate + Execute</h3>
+
+<p>To execute multiple actions in a single transaction, we need to construct the <code>calldata</code> that our delegated smart contract will receive. This calldata encodes a <strong>batch</strong> of low-level calls that will be forwarded by the <code>executeBatch()</code> function in our delegator contract.</p>
+
+<p>We follow the <strong>same delegation flow as before</strong>, but instead of leaving the calldata empty (<code>0x</code>), we now include our batch payload.</p>
+
+<p>Let's focus on how we construct that calldata:</p>
+
+<pre class="language-typescript"><code>// 1. Approve calldata
+const erc20Interface = new Interface([
+  'function approve(address spender, uint256 amount)'
+]);
+
+const approveCalldata = erc20Interface.encodeFunctionData(
+  'approve',
+  [dclController, amount]
+);
+
+// 2. Register calldata
+const registerInterface = new Interface([
+  'function register(string _name, address _beneficiary)'
+]);
+
+const name = '0xhackmd';
+const registerCalldata = registerInterface.encodeFunctionData(
+  'register',
+  [name, authorizer.address]
+);
+
+// 3. Combine into batched calls
+const calls = [
+  { target: tokenAddr, value: 0n, data: approveCalldata },
+  { target: dclController, value: 0n, data: registerCalldata }
+];
+
+// 4. Encode batch using delegator's interface
+const batchIface = new Interface([
+  'function executeBatch((address target,uint256 value,bytes data)[] calls)'
+]);
+
+const batchData = batchIface.encodeFunctionData('executeBatch', [calls]);
+</code></pre>
+
+<h3>What's Happening Here?</h3>
+
+<ul>
+<li>We first <strong>encode an ERC-20 approval</strong>, allowing the controller contract to spend tokens on behalf of the EOA.</li>
+<li>Then we <strong>encode a call to the Name Registry's <code>register()</code> method</strong>, which performs the NFT minting.</li>
+<li>Both calls are wrapped in a single array and encoded via <code>executeBatch(...)</code> from the Delegator contract.</li>
+</ul>
+
+<p>This <code>batchData</code> is what we set as the <code>data</code> field in the transaction. The <code>to</code> field should now be set to the <strong>EOA address</strong>, because it has already delegated its code via EIP-7702.</p>
+
+<p>Together with the <code>authorizationList</code>, this creates a transaction that <strong>delegates and executes atomically</strong>.</p>
+
+<h3>Sending the Delegate + Execute Transaction</h3>
+
+<p>We now have everything we need to send the transaction.</p>
+
+<p>Unlike the previous delegation-only step—where we sent the transaction to <code>0x0</code> with empty calldata—this time we are <strong>executing logic</strong>, so:</p>
+
+<ul>
+<li>The <code>to</code> field must be the <strong>EOA address</strong> (since it now temporarily runs the delegated contract logic)</li>
+<li>The <code>data</code> field must contain the <strong>batch calldata</strong> we just built (<code>batchData</code>)</li>
+</ul>
+
+<p>Here's how the final transaction object looks:</p>
+
+<pre class="language-typescript"><code>const tx = {
+  type: 4,                            // EIP-7702 transaction type
+  chainId,
+  nonce: relayerNonce,
+  maxPriorityFeePerGas: toBigInt('1000000000'),  // 1 Gwei
+  maxFeePerGas: toBigInt('10000000000'),         // 10 Gwei
+  gasLimit: 2_000_000n,
+  to: authorizer.address,            // EOA address (not the delegator contract)
+  value: 0n,
+  data: batchData,                   // Encoded executeBatch with our two actions
+  accessList: [],
+  authorizationList: [authorization] // Same structure as before
+};
+
+const raw = await relayer.signTransaction(tx)
+const txHash = await provider.send('eth_sendRawTransaction', [raw])
+console.log('Raw tx sent, hash =', txHash)
+</code></pre>
+
+<p>This transaction is once again sent by the <strong>relayer</strong>, not the EOA. The EOA only signed the authorization message—allowing the relayer to pay gas and perform the full delegate+execute workflow on their behalf.</p>
+
+<p>Once confirmed, you'll see on the <a href="https://sepolia.etherscan.io/tx/0x477f3fba2f50a0ff01fc55aa940a2f2eacdd8abcf1806a30fbba244d9e12d5f5" target="_blank" rel="noopener noreferrer">block explorer</a> that:</p>
+
+<ul>
+<li>The transaction was sent <strong>to the EOA</strong></li>
+<li>The <strong>authorization</strong> was used</li>
+<li>The <strong>approve</strong> and <strong>register</strong> calls were executed atomically in a single step and now the authorizer has <a href="https://sepolia.etherscan.io/address/0xba6e94ccd3ef39b5214dc945fb53ad4aadd0bcdb#tokentxns" target="_blank" rel="noopener noreferrer">100 tokens less</a> and a <a href="https://sepolia.etherscan.io/address/0xba6e94ccd3ef39b5214dc945fb53ad4aadd0bcdb#nfttransfers" target="_blank" rel="noopener noreferrer">new NFT name</a></li>
+</ul>
+
+<p><img src="https://hackmd.io/_uploads/rkhmdbYGlg.png" alt="Tokens Transferred" /></p>
+<p><img src="https://hackmd.io/_uploads/BJn7ObYMel.png" alt="NFT Minted" /></p>
+
+<div class="blog-callout blog-callout-success">
+<p>You've now successfully delegated and executed in a single transaction!</p>
+</div>
+
+<p>See the full code <a href="https://github.com/nachomazzara/eip7702-poc/blob/main/src/register_name.ts" target="_blank" rel="noopener noreferrer">here.</a></p>
+
+<h2 id="undelegating-revoking-delegation">Undelegating (Revoking Delegation)</h2>
+
+<p>This section demonstrates how to <strong>revoke a previously granted delegation</strong>, effectively disabling the smart account behavior of the EOA.</p>
+
+<p>Revoking delegation is essential for restoring full control to the EOA and ensuring that no further interactions can be executed through the delegated contract.</p>
+
+<p>The process is nearly identical to the initial delegation transaction, with one key difference:</p>
+
+<blockquote>
+<p>The <code>authorization.address</code> (delegated address) must be set to the <strong>zero address</strong>:<br>
+<code>0x0000000000000000000000000000000000000000</code></p>
+</blockquote>
+
+<p>This signals to the network that the EOA no longer wishes to execute any smart contract logic and is returning to standard behavior.</p>
+
+<p>The rest of the transaction (type <code>0x04</code>, signed authorization, etc.) remains the same.</p>
+
+<p>Code example and transaction structure for undelegation follow in the next section.</p>
+
+<pre class="language-typescript"><code>// Set up accounts...
+
+const delegatorAddr = '0x0000000000000000000000000000000000000000'
+
+// Sign and build authorization payload...
+
+const tx = {
+    type: 4,
+    chainId,
+    nonce: relayerNonce,
+    maxPriorityFeePerGas: toBigInt('1000000000'),
+    maxFeePerGas: toBigInt('10000000000'),
+    gasLimit: 2_000_000n,
+    to: '0x0000000000000000000000000000000000000000',
+    value: 0n,
+    data: '0x',
+    accessList: [],
+    authorizationList: [authorization]
+}
+
+// Send transaction
+</code></pre>
+
+<p>Now, you can manually verify the undelegation by checking the <strong>Authorization List</strong> section in the transaction:</p>
+
+<p><a href="https://sepolia.etherscan.io/tx/0x010d31cb5ce4435cd7c84938b59ac4db9e4d545985d159498d7e17c56fb51637#authorizationlist" target="_blank" rel="noopener noreferrer">View transaction on Sepolia Etherscan</a></p>
+
+<p><img src="https://hackmd.io/_uploads/HkZqjZtMxl.png" alt="Delegation to empty address" /></p>
+
+<p>Once there, confirm the following:</p>
+
+<ul>
+<li>The <strong>Delegated Address</strong> is:<br>
+<code>0x0000000000000000000000000000000000000000</code></li>
+</ul>
+
+<p>This means the EOA has revoked any previously assigned smart contract logic and is now back to regular EOA behavior—no contract execution will occur on its behalf going forward. Check <a href="https://sepolia.etherscan.io/tx/0xf6dd2dff39db1f6707a97de6bfb21ef5785e5683e418debe380948f24f3bf7a5" target="_blank" rel="noopener noreferrer">this transaction</a> that calls the EOA but no code is executed.</p>
+
+<div class="blog-callout blog-callout-success">
+<p>This completes the undelegation step.</p>
+</div>
+
+<p>See the full code <a href="https://github.com/nachomazzara/eip7702-poc/blob/main/src/undelegate.ts" target="_blank" rel="noopener noreferrer">here.</a></p>
+
+<h2 id="bonus-track-advanced-use-cases-and-considerations">Bonus Track: Advanced Use Cases and Considerations</h2>
+
+<p>Below are some key patterns and ideas for extending delegation securely and flexibly.</p>
+
+<h3>1. Safe Delegator with Signature Verification</h3>
+
+<p>Instead of using a minimal delegator that blindly forwards calls, a safer approach is to use a delegator that <strong>verifies the EOA's signature on each individual User Operation</strong>.</p>
+
+<blockquote>
+<p>Once you sign an EIP-7702 authorization, you are effectively telling the network:<br>
+"This contract can act on my behalf."</p>
+
+<p>That means <strong>anyone</strong> can send transactions to that delegated contract in your name, <strong>as long as it's during the active delegation window</strong>. If the contract doesn't have internal logic to verify who called it (like checking the sender or validating per-call signatures), then <strong>anyone could potentially call sensitive functions</strong>, drain your assets, or exploit approvals.</p>
+
+<p>So please:<br>
+<strong>Always check what you're signing</strong>, and make sure any delegated contract includes strict verification mechanisms. With great power (temporary smart accounts) comes great responsibility (not getting rekt).</p>
+</blockquote>
+
+<p>This typically includes:</p>
+
+<ul>
+<li>A <code>UserOperation</code> struct with fields like <code>nonce</code>, <code>target</code>, <code>data</code>, etc.</li>
+<li>ECDSA signature verification (<code>ecrecover</code>) inside the smart contract</li>
+<li>Replay protection using nonces</li>
+</ul>
+
+<p>This ensures that even once delegation is active, only explicitly signed actions by the EOA are executed.</p>
+
+<blockquote>
+<p>Recommended for production use to prevent unauthorized access or abuse.</p>
+</blockquote>
+
+<pre class="language-solidity"><code>
+/// @notice Forwards a batch of calls with signature verification
+/// @param signedBatch The signed batch containing calls, nonce, deadline and signature
+/// @return results An array of return data, one per call
+function executeBatch(SignedBatch calldata signedBatch)
+    external
+    payable
+    returns (bytes[] memory results)
+{
+        // Check deadline
+        if (block.timestamp > signedBatch.deadline) revert DeadlineExpired();
+        
+        // Check nonce
+        if (usedNonces[signedBatch.nonce]) revert NonceAlreadyUsed();
+        usedNonces[signedBatch.nonce] = true;
+
+        // Verify signature
+        bytes32 messageHash = getBatchHash(
+            signedBatch.calls, signedBatch.nonce, signedBatch.deadline
+        );
+        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(
+            messageHash
+        );
+        address signer = ECDSA.recover(
+            ethSignedMessageHash,
+            signedBatch.signature
+        );
+        
+        // Check if signer is an allowed caller
+        if (!allowedCallers[signer]) revert NotAllowedCaller();
+
+        uint256 n = signedBatch.calls.length;
+        results = new bytes[](n);
+
+        // Forward each call
+        for (uint256 i = 0; i < n; i++) {
+            Call calldata c = signedBatch.calls[i];
+            (bool ok, bytes memory ret) = c.target.call{ value: c.value }(c.data);
+            require(ok, "BatchDelegator: call failed");
+
+            if (ret.length > 0) {
+                bool success = abi.decode(ret, (bool));
+                require(success, "BatchDelegator: call returned false");
+            }
+            results[i] = ret;
+        }
+
+        emit BatchExecuted(address(this), msg.sender, signedBatch.calls, results);
+        return results;
+}
+</code></pre>
+
+<h4>How Signature Verification Works</h4>
+
+<p>Here's what this contract does to ensure <strong>only authorized operations are executed</strong>:</p>
+
+<ul>
+<li><code>deadline</code> and <code>nonce</code> provide replay protection and time-bound validity.</li>
+<li>The contract uses <code>getBatchHash(...)</code> to hash:
+<ul>
+<li>The list of calls</li>
+<li>The nonce</li>
+<li>The deadline</li>
+</ul>
+</li>
+<li>It then wraps that hash using <code>toEthSignedMessageHash(...)</code>, mimicking <code>eth_sign</code> behavior.</li>
+<li>Finally, it uses <code>ECDSA.recover(...)</code> to extract the <strong>signer</strong> from the provided signature.</li>
+</ul>
+
+<p>If the recovered <code>signer</code> <strong>does not match any of the allowedCallers</strong> (i.e., the current EOA being impersonated via EIP-7702), the transaction reverts with <code>InvalidSignature</code>.</p>
+
+<blockquote>
+<p>This guarantees that only the account that originally authorized the delegation can execute batches, adding an important layer of security.</p>
+</blockquote>
+
+<p>This type of delegator transforms the EOA into a true <strong>programmable smart account</strong>, while still respecting the minimal and temporary nature of EIP-7702 delegation.</p>
+
+<p>You can check the full code <a href="https://github.com/nachomazzara/eip7702-poc/blob/main/src/contracts/batchDelegatorWithCallers.sol" target="_blank" rel="noopener noreferrer">here</a></p>
+
+<h3>2. Delegator with Social Recovery or Multi-Signer Logic</h3>
+
+<p>Another extension is to design the delegator with <strong>social recovery mechanisms</strong> or <strong>multi-signer logic</strong>, where:</p>
+
+<ul>
+<li>Additional addresses (guardians, recovery keys, etc.) can be added over time</li>
+<li>The EOA can delegate permission to more than one signer</li>
+<li>Recovery or revocation can be triggered if the primary key is lost</li>
+</ul>
+
+<p>This turns the delegator into a more complete <strong>smart account</strong> or <strong>wallet contract</strong>, bringing flexibility and resilience while maintaining EIP-7702's temporary delegation model.</p>
+
+<p>Below is an example of a function that updates the list of allowed callers, but only after verifying a signature from the designated admin. Remember that you can enhance social recovery by using the same approach for having multiple admins:</p>
+
+<pre class="language-solidity"><code>/// @notice Update callers (add or remove) with signature verification
+/// @param signedUpdate The signed update containing callers, add/remove flags, nonce, deadline and signature
+function updateCallers(SignedCallerUpdate calldata signedUpdate) external {
+    // Check arrays length
+    if (signedUpdate.callers.length != signedUpdate.isAdding.length) revert ArrayLengthMismatch();
+    
+    // Check deadline
+    if (block.timestamp > signedUpdate.deadline) revert DeadlineExpired();
+    
+    // Check nonce
+    if (usedNonces[signedUpdate.nonce]) revert NonceAlreadyUsed();
+    usedNonces[signedUpdate.nonce] = true;
+
+    // Verify signature from admin
+    bytes32 messageHash = getCallerUpdateHash(
+        signedUpdate.callers, 
+        signedUpdate.isAdding, 
+        signedUpdate.nonce, 
+        signedUpdate.deadline
+    );
+    bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
+    address signer = ECDSA.recover(ethSignedMessageHash, signedUpdate.signature);
+    
+    if (signer != admin) revert InvalidSignature();
+
+    // Update callers
+    for (uint256 i = 0; i < signedUpdate.callers.length; i++) {
+        allowedCallers[signedUpdate.callers[i]] = signedUpdate.isAdding[i];
+        emit CallerUpdated(signedUpdate.callers[i], signedUpdate.isAdding[i]);
+    }
+}
+</code></pre>
+
+<p>You can check the full code <a href="https://github.com/nachomazzara/eip7702-poc/blob/main/src/contracts/batchDelegatorWithCallers.sol" target="_blank" rel="noopener noreferrer">here</a></p>
+
+<h3>3. Multiple Delegations: Last One Wins</h3>
+
+<p>If multiple <code>authorizationList</code> entries are submitted for the same EOA in the same transaction, the <strong>last one included in the transaction takes effect</strong>. This is why it is not possible to delegate and undelegate within the same transaction.</p>
+
+<p>Thats all. Thanks for reading!</p>
+
+<p>Hope this post helped you understand the mechanics of EIP-7702 a little better—or at least sparked some curiosity. <a href="https://github.com/nachomazzara/eip7702-poc" target="_blank" rel="noopener noreferrer">Here</a> you can find the repo for full code examples.</p>
+
+<p>Feel free to reach out on <a href="https://x.com/nachomazzara" target="_blank" rel="noopener noreferrer">Twitter</a> if you have questions, ideas, or just want to nerd out.</p>
+
+<p>See you on-chain!</p>
+

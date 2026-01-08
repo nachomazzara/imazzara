@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { Helmet } from 'react-helmet-async'
 import { useGists, useProjects } from '../hooks'
 import { trackLinkClick, trackPageView } from '../analytics'
 import { blogPosts } from '../blogPosts'
-import { resetMetaTags } from '../utils/metaTags'
 import '../App.css'
 
 function Home() {
@@ -11,14 +11,27 @@ function Home() {
   const gists = useGists()
 
   useEffect(() => {
-    resetMetaTags()
-    trackPageView('/', 'Ignacio Mazzara')
+    trackPageView('/', 'Nacho Mazzara')
   }, [])
 
   return (
     <>
+      <Helmet>
+        <title>Nacho Mazzara</title>
+        <meta name="title" content="Nacho Mazzara" />
+        <meta name="description" content="Personal website where I show things but not only" />
+        <meta property="og:title" content="Nacho Mazzara" />
+        <meta property="og:description" content="Personal website where I show things but not only" />
+        <meta property="og:url" content="https://imazzara.com" />
+        <meta property="og:type" content="website" />
+        <meta property="og:image" content="https://imazzara.com/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Nacho Mazzara" />
+        <meta name="twitter:description" content="Personal website where I show things but not only" />
+        <meta name="twitter:image" content="https://imazzara.com/favicon.ico" />
+      </Helmet>
       <div className="container">
-        <h1> Hi, I'm Ignacio Mazzara</h1>
+        <h1> Hi, I'm Nacho Mazzara</h1>
         <p>
           <b>Now:</b> VP of Engineering at{' '}
           <a

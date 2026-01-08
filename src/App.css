@@ -1,7 +1,11 @@
 .container {
   margin: 20px;
+  padding: 0;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .content {
@@ -11,6 +15,7 @@
   justify-content: space-between;
   max-width: 670px;
   margin-bottom: 50px;
+  width: 100%;
 }
 
 .articles {
@@ -44,7 +49,11 @@ footer {
   position: fixed;
   bottom: 0;
   padding: 15px 20px 20px 20px;
-  width: calc(100% - 40px);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  left: 0;
+  right: 0;
 }
 
 footer a {
@@ -53,7 +62,16 @@ footer a {
 }
 
 @media (max-width: 520px) {
+  .container {
+    margin: 15px;
+  }
+
+  .content {
+    max-width: 100%;
+  }
+
   footer {
     position: relative;
+    padding: 15px;
   }
 }

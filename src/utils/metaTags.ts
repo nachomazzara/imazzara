@@ -54,7 +54,7 @@ export function updateMetaTags({
 }
 
 export function resetMetaTags() {
-  const defaultTitle = 'Ignacio Mazzara'
+  const defaultTitle = 'Nacho Mazzara'
   const defaultDescription = 'Personal website where I show things but not only'
   const defaultUrl = 'https://imazzara.com'
 
