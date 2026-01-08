@@ -17,7 +17,77 @@
     <meta name="theme-color" content="#000000" />
     <meta name="color-scheme" content="dark light">
     <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Default meta tags -->
     <title>Nacho Mazzara</title>
+    <meta name="description" content="Personal website where I show things but not only" />
+    <meta property="og:title" content="Nacho Mazzara" />
+    <meta property="og:description" content="Personal website where I show things but not only" />
+    <meta property="og:url" content="https://imazzara.com" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://imazzara.com/favicon.ico" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Nacho Mazzara" />
+    <meta name="twitter:description" content="Personal website where I show things but not only" />
+    <meta name="twitter:image" content="https://imazzara.com/favicon.ico" />
+    
+    <script>
+      // Update meta tags for blog posts (for social media crawlers)
+      (function() {
+        const path = window.location.pathname;
+        const blogMatch = path.match(/^\/blog\/(.+)$/);
+        
+        if (blogMatch) {
+          const slug = blogMatch[1];
+          const blogPosts = {
+            'implementing-eip-7702': {
+              title: 'Implementing EIP-7702: A (almost) Low-Level Guide',
+              description: 'This guide will walk you through implementing EIP-7702 (ERC-7702) at a low level, without using high-level functions from libraries or toolkits like ethers, viem, alchemy, etc.',
+              image: 'https://imazzara.com/og-images/implementing-eip-7702-de5d72ea.png'
+            },
+            'engineering-isnt-here-to-build-features': {
+              title: 'Engineering Isn\'t Here to Build Features — It\'s Here to Enable the Business',
+              description: 'I\'ve seen this a few times already in my career. Engineering teams moving fast, building amazing stuff, delivering sprint after sprint, yet somehow the company itself doesn\'t move faster.',
+              image: 'https://imazzara.com/og-images/engineering-isnt-here-to-build-features-c7f52089.png'
+            },
+            'the-prison-of-career-mediocrity': {
+              title: 'The Prison of Career Mediocrity',
+              description: 'I read The Prison of Financial Mediocrity and I can\'t stop thinking about it. Not because it\'s about money, but because the same structure applies almost perfectly to software careers.',
+              image: 'https://imazzara.com/og-images/the-prison-of-career-mediocrity-5214a35d.png'
+            }
+          };
+          
+          const post = blogPosts[slug];
+          if (post) {
+            const url = 'https://imazzara.com' + path;
+            const fullTitle = post.title + ' | Nacho Mazzara';
+            
+            // Update title
+            document.title = fullTitle;
+            
+            // Update meta tags
+            const updateMeta = (name, content, isProperty) => {
+              const selector = isProperty ? `meta[property="${name}"]` : `meta[name="${name}"]`;
+              let meta = document.querySelector(selector);
+              if (meta) {
+                meta.setAttribute('content', content);
+              }
+            };
+            
+            updateMeta('description', post.description, false);
+            updateMeta('og:type', 'article', true);
+            updateMeta('og:url', url, true);
+            updateMeta('og:title', post.title, true);
+            updateMeta('og:description', post.description, true);
+            updateMeta('og:image', post.image, true);
+            updateMeta('twitter:card', 'summary_large_image', false);
+            updateMeta('twitter:title', post.title, false);
+            updateMeta('twitter:description', post.description, false);
+            updateMeta('twitter:image', post.image, false);
+          }
+        }
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
