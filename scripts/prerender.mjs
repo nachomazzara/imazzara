@@ -1,11 +1,10 @@
 import puppeteer from 'puppeteer'
-import { writeFileSync, mkdirSync, readFileSync } from 'fs'
+import puppeteerCore from 'puppeteer-core'
+import chromium from '@sparticuz/chromium'
+import { writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 const buildDir = join(root, 'build')
@@ -56,10 +55,31 @@ async function prerender() {
   // Wait for server to be ready
   await waitForServer(baseUrl)
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  })
+  // Configure Puppeteer for Vercel environment
+  const isVercel = process.env.VERCEL || process.env.VERCEL_ENV
+  let browser
+
+  if (isVercel) {
+    // Use serverless-optimized Chromium for Vercel
+    browser = await puppeteerCore.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    })
+    console.log('Using @sparticuz/chromium for Vercel')
+  } else {
+    // Use regular Puppeteer for local development
+    const launchOptions = {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+      ],
+    }
+    browser = await puppeteer.launch(launchOptions)
+  }
 
   try {
     for (const route of routes) {

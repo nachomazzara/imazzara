@@ -21,6 +21,20 @@ npm run dev
 - Build Command: `npm run build:prerender`
 - Output Directory: `build`
 
+### Test Build Locally
+
+```bash
+# Test build without deploying
+npm run vercel:build
+
+# Deploy to production
+npm run vercel:deploy
+
+# Or use Vercel CLI directly
+vercel build
+vercel --prod
+```
+
 The prerender script generates static HTML files for:
 - `/` (homepage)
 - `/blog/:slug` (all blog posts)

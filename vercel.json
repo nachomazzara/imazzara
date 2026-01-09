@@ -1,9 +1,9 @@
 {
   "version": 2,
   "alias": "imazzara.com",
-  "name": "imazzara",
   "buildCommand": "npm run build:prerender",
   "outputDirectory": "build",
+  "installCommand": "npm install",
   "rewrites": [
     {
       "source": "/blog/:slug",

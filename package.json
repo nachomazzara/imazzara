@@ -15,9 +15,12 @@
     "build:prerender": "vite build && node scripts/prerender.mjs",
     "preview": "vite preview",
     "start": "vite",
-    "generate-og": "node scripts/generate-og-images.mjs"
+    "generate-og": "node scripts/generate-og-images.mjs",
+    "vercel:build": "vercel build",
+    "vercel:deploy": "vercel --prod"
   },
   "devDependencies": {
+    "@sparticuz/chromium": "^143.0.4",
     "@types/node": "^22.10.2",
     "@types/prismjs": "^1.26.5",
     "@types/react": "^18.3.12",
@@ -25,6 +28,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "prettier": "^2.1.2",
     "puppeteer": "^24.34.0",
+    "puppeteer-core": "^24.34.0",
     "typescript": "^5.7.2",
     "vite": "^6.4.1"
   },
