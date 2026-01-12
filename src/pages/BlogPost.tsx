@@ -87,7 +87,13 @@ function BlogPost() {
   useEffect(() => {
     if (!post) return
 
+    // Reset tracked milestones when slug changes
+    trackedMilestones.current.clear()
+
     const handleScroll = () => {
+      // Check slug right before tracking - it's already in scope from useParams
+      if (!slug) return
+
       const windowHeight = window.innerHeight
       const documentHeight = document.documentElement.scrollHeight
       const scrollTop = window.scrollY || document.documentElement.scrollTop
@@ -103,8 +109,8 @@ function BlogPost() {
           scrollPercentage >= milestone &&
           !trackedMilestones.current.has(milestone)
         ) {
-          trackedMilestones.current.add(milestone)
           trackScrollDepth(milestone, slug)
+          trackedMilestones.current.add(milestone)
         }
       })
     }
@@ -116,6 +122,8 @@ function BlogPost() {
 
     return () => {
       window.removeEventListener('scroll', handleScroll)
+      // Clear tracked milestones on cleanup
+      trackedMilestones.current.clear()
     }
   }, [post, slug])
 

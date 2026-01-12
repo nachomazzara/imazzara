@@ -29,13 +29,17 @@ export function trackLinkClick(url: string, linkText: string, linkType?: string)
   }
 }
 
-export function trackScrollDepth(percentage: number, postSlug?: string) {
+export function trackScrollDepth(percentage: number, postSlug: string) {
   if (typeof window !== 'undefined' && window.gtag) {
+    if (!postSlug) {
+      console.warn('trackScrollDepth called without postSlug')
+      return
+    }
     window.gtag('event', 'scroll', {
       event_category: 'engagement',
       event_label: `${percentage}%`,
       scroll_depth: percentage,
-      post_slug: postSlug || '',
+      post_slug: postSlug,
     })
   }
 }
