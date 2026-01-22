@@ -40,6 +40,11 @@
         if (blogMatch) {
           const slug = blogMatch[1];
           const blogPosts = {
+            'how-leaders-can-break-the-career-casino': {
+              title: 'How Leaders Can Break the Career Casino',
+              description: 'I wrote the previous piece as a diagnosis. This one is about intervention. If software careers increasingly resemble a casino, it\'s not because people suddenly lost discipline or patience.',
+              image: 'https://imazzara.com/og-images/how-leaders-can-break-the-career-casino-57f2eade.png'
+            },
             'implementing-eip-7702': {
               title: 'Implementing EIP-7702: A (almost) Low-Level Guide',
               description: 'This guide will walk you through implementing EIP-7702 (ERC-7702) at a low level, without using high-level functions from libraries or toolkits like ethers, viem, alchemy, etc.',
@@ -69,9 +74,16 @@
             const updateMeta = (name, content, isProperty) => {
               const selector = isProperty ? `meta[property="${name}"]` : `meta[name="${name}"]`;
               let meta = document.querySelector(selector);
-              if (meta) {
-                meta.setAttribute('content', content);
+              if (!meta) {
+                meta = document.createElement('meta');
+                if (isProperty) {
+                  meta.setAttribute('property', name);
+                } else {
+                  meta.setAttribute('name', name);
+                }
+                document.head.appendChild(meta);
               }
+              meta.setAttribute('content', content);
             };
             
             updateMeta('description', post.description, false);
@@ -80,6 +92,9 @@
             updateMeta('og:title', post.title, true);
             updateMeta('og:description', post.description, true);
             updateMeta('og:image', post.image, true);
+            updateMeta('og:image:width', '1200', true);
+            updateMeta('og:image:height', '630', true);
+            updateMeta('og:image:type', 'image/png', true);
             updateMeta('twitter:card', 'summary_large_image', false);
             updateMeta('twitter:title', post.title, false);
             updateMeta('twitter:description', post.description, false);

@@ -13,6 +13,7 @@ const baseUrl = 'http://localhost:4173'
 // Routes to prerender
 const routes = [
   '/',
+  '/blog/how-leaders-can-break-the-career-casino',
   '/blog/the-prison-of-career-mediocrity',
   '/blog/engineering-isnt-here-to-build-features',
   '/blog/implementing-eip-7702',
