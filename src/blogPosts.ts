@@ -1,7 +1,7 @@
 import { BlogPost } from './types'
 
 // Import HTML content using Vite's ?raw suffix
-import makingACodebaseAiReadyContent from './content/posts/making-a-codebase-ai-ready.html?raw'
+import missingLayerContent from './content/posts/the-missing-layer-between-your-codebase-and-a-coding-agent.html?raw'
 import thePrisionOfCareerMediocrityContent from './content/posts/the-prison-of-career-mediocrity.html?raw'
 import leadersCanBreakTheCareerCasinoContent from './content/posts/how-leaders-can-break-the-career-casino.html?raw'
 import engineeringIsntHereContent from './content/posts/engineering-isnt-here-to-build-features.html?raw'
@@ -9,12 +9,12 @@ import implementingEip7702Content from './content/posts/implementing-eip-7702.ht
 
 export const blogPosts: BlogPost[] = [
   {
-    slug: 'making-a-codebase-ai-ready',
+    slug: 'the-missing-layer-between-your-codebase-and-a-coding-agent',
     title: 'The Missing Layer Between Your Codebase and a Coding Agent',
     hero: '<>',
     published: new Date('2026-03-11'),
-    content: makingACodebaseAiReadyContent,
-    ogImage: '/og-images/making-a-codebase-ai-ready-60d6a4d3.png',
+    content: missingLayerContent,
+    ogImage: '/og-images/the-missing-layer-between-your-codebase-and-a-coding-agent-60d6a4d3.png',
   },
   {
     slug: 'leaders-can-break-the-career-casino',
