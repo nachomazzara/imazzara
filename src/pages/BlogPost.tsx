@@ -43,6 +43,27 @@ function BlogPost() {
 
   useEffect(() => {
     if (post && contentRef.current) {
+      // Make images clickable to open in modal
+      const images = contentRef.current.querySelectorAll('img')
+      images.forEach((img) => {
+        img.addEventListener('click', () => {
+          const overlay = document.createElement('div')
+          overlay.className = 'image-modal-overlay'
+          const modalImg = document.createElement('img')
+          modalImg.src = img.src
+          modalImg.alt = img.alt
+          overlay.appendChild(modalImg)
+          overlay.addEventListener('click', () => overlay.remove())
+          document.addEventListener('keydown', function handler(e) {
+            if (e.key === 'Escape') {
+              overlay.remove()
+              document.removeEventListener('keydown', handler)
+            }
+          })
+          document.body.appendChild(overlay)
+        })
+      })
+
       // Set all code blocks to TypeScript (hardcoded as requested)
       const codeBlocks = contentRef.current.querySelectorAll('pre code')
       codeBlocks.forEach((code) => {
