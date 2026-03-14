@@ -10,13 +10,16 @@ const root = join(__dirname, '..')
 const buildDir = join(root, 'build')
 const baseUrl = 'http://localhost:4173'
 
+// Extract blog slugs dynamically from blogPosts.ts
+import { readFileSync } from 'fs'
+const blogPostsSource = readFileSync(join(root, 'src', 'blogPosts.ts'), 'utf-8')
+const slugMatches = [...blogPostsSource.matchAll(/slug:\s*'([^']+)'/g)]
+const blogRoutes = slugMatches.map(m => `/blog/${m[1]}`)
+
 // Routes to prerender
 const routes = [
   '/',
-  '/blog/leaders-can-break-the-career-casino',
-  '/blog/the-prison-of-career-mediocrity',
-  '/blog/engineering-isnt-here-to-build-features',
-  '/blog/implementing-eip-7702',
+  ...blogRoutes,
 ]
 
 async function waitForServer(url, maxAttempts = 30) {
